@@ -71,7 +71,7 @@ function toListItem(href) {
   return testList;
 }
 
-export function run(conf) {
+export async function run(conf) {
   /** @type {NodeListOf<HTMLElement>} */
   const elems = document.querySelectorAll("[data-tests]");
   const testables = [...elems].filter(elem => elem.dataset.tests);
@@ -84,10 +84,15 @@ export function run(conf) {
     return;
   }
 
+  const filesInWPT = await getFilesInWPT(conf.testSuiteURI, conf.githubAPI);
+
   for (const elem of testables) {
     const tests = elem.dataset.tests.split(/,/gm).map(url => url.trim());
     const testURLs = toTestURLs(tests, conf.testSuiteURI);
+
     handleDuplicates(testURLs, elem);
+    handleTestsNotInWPT(tests, filesInWPT, elem);
+
     const details = toHTML(testURLs);
     elem.append(details);
     delete elem.dataset.tests;
@@ -144,4 +149,33 @@ function toHTML(testURLs) {
     <ul>${uniqueList.map(toListItem)}</ul>
   `;
   return details;
+}
+
+/**
+ * @param {string[]} tests
+ * @param {Set<string>} filesInWPT
+ * @param {HTMLElement} elem
+ */
+async function handleTestsNotInWPT(tests, filesInWPT, elem) {
+  const nonExisting = tests
+    .map(test => test.trim().split("#")[0])
+    .filter(test => !filesInWPT.has(test));
+  if (nonExisting.length) {
+    const title = "Test does not exist in WPT repository";
+    const msg = `${title}: ${nonExisting.map(t => `\`${t}\``).join(", ")}`;
+    showInlineWarning(elem, msg, title);
+  }
+}
+
+async function getFilesInWPT(testSuiteURI, githubAPI) {
+  const wptDirectory = new URL(testSuiteURI).pathname.replace(/\//g, "");
+  const url = new URL(githubAPI);
+  url.pathname = `github/web-platform-tests/wpt/files`;
+  url.searchParams.set("path", wptDirectory);
+
+  const response = await fetch(url);
+  /** @type {{ entries: string[] }} */
+  const { entries } = await response.json();
+  const files = entries.filter(entry => !entry.endsWith("/"));
+  return new Set(files);
 }
